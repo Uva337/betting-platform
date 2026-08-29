@@ -41,3 +41,10 @@ func (s *BetService) ProcessBet(ctx context.Context, userID, matchID int, amount
 
 	return bet, nil
 }
+
+// GetBet запрашивает ставку по ID из репозитория
+func (s *BetService) GetBet(ctx context.Context, id int) (*models.Bet, error) {
+	// Здесь могла бы быть дополнительная бизнес-логика,
+	// например, проверка прав доступа, но пока просто проксируем запрос в БД
+	return s.repo.GetBetByID(ctx, id)
+}

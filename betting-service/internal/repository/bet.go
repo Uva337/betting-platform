@@ -44,3 +44,34 @@ func (r *BetRepository) CreateBet(ctx context.Context, bet *models.Bet) error {
 
 	return nil
 }
+
+// GetBetByID ищет ставку в базе по её ID
+func (r *BetRepository) GetBetByID(ctx context.Context, id int) (*models.Bet, error) {
+	// Запрос на поиск одной строки (SELECT)
+	query := `
+		SELECT id, user_id, match_id, amount, odds, status, created_at
+		FROM bets
+		WHERE id = $1
+	`
+
+	var bet models.Bet
+
+	// Выполняем запрос и считываем колонки в структуру.
+	// Порядок переменных в Scan() должен строго совпадать с порядком колонок в SELECT!
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&bet.ID,
+		&bet.UserID,
+		&bet.MatchID,
+		&bet.Amount,
+		&bet.Odds,
+		&bet.Status,
+		&bet.CreatedAt,
+	)
+
+	if err != nil {
+		// Если база ответит "нет таких строк" (pgx.ErrNoRows), вернется эта ошибка
+		return nil, fmt.Errorf("ставка не найдена: %w", err)
+	}
+
+	return &bet, nil
+}

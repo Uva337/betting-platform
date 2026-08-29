@@ -49,6 +49,8 @@ func main() {
 
 		// Обрати внимание: теперь мы вызываем метод структуры betHandler.PlaceBet
 		r.Post("/bets", betHandler.PlaceBet)
+
+		r.Get("/bets/{id}", betHandler.GetBet)
 	})
 
 	// 4. Запуск HTTP-сервера

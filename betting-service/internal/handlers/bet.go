@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
-	"log" // <-- Добавили забытый пакет log
+	"log"
 	"net/http"
+	"strconv"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/uva337/betting-platform/betting-service/internal/service"
 )
 
@@ -54,6 +56,36 @@ func (h *BetHandler) PlaceBet(w http.ResponseWriter, r *http.Request) {
 	// 4. Отправляем успешный ответ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"data":   bet,
+	})
+}
+
+// GetBet возвращает информацию о ставке по её ID
+func (h *BetHandler) GetBet(w http.ResponseWriter, r *http.Request) {
+	// 1. Вытаскиваем ID из URL (например, из /bets/4 достаем "4")
+	idStr := chi.URLParam(r, "id")
+
+	// Конвертируем строку "4" в число 4
+	betID, err := strconv.Atoi(idStr)
+	if err != nil || betID <= 0 {
+		http.Error(w, `{"error": "invalid bet id"}`, http.StatusBadRequest)
+		return
+	}
+
+	// 2. Идем за данными в слой бизнес-логики (его мы сейчас напишем)
+	bet, err := h.betService.GetBet(r.Context(), betID)
+	if err != nil {
+		// Если ставка не найдена или случилась ошибка БД
+		http.Error(w, `{"error": "bet not found"}`, http.StatusNotFound)
+		return
+	}
+
+	// 3. Возвращаем успешный ответ
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK) // 200 OK
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "success",
