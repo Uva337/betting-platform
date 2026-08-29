@@ -7,7 +7,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/uva337/betting-platform/betting-service/internal/handlers"
 	"github.com/uva337/betting-platform/betting-service/internal/repository"
+	"github.com/uva337/betting-platform/betting-service/internal/service"
 )
 
 func main() {
@@ -31,6 +33,9 @@ func main() {
 
 	log.Println("Successfully connected to PostgreSQL (betting_service_db)!")
 
+	repo := repository.NewBetRepository(pool)
+	betSvc := service.NewBetService(repo)
+	betHandler := handlers.NewBetHandler(betSvc)
 	// 3. Инициализируем роутер Chi
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -41,6 +46,9 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("pong"))
 		})
+
+		// Обрати внимание: теперь мы вызываем метод структуры betHandler.PlaceBet
+		r.Post("/bets", betHandler.PlaceBet)
 	})
 
 	// 4. Запуск HTTP-сервера
