@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uva337/betting-platform/betting-service/internal/service"
@@ -47,8 +48,18 @@ func (h *BetHandler) PlaceBet(w http.ResponseWriter, r *http.Request) {
 	// 3. Вызываем слой бизнес-логики ОДИН РАЗ
 	bet, err := h.betService.ProcessBet(r.Context(), req.UserID, req.MatchID, req.Amount)
 	if err != nil {
-		// Вот наш лог для отладки
 		log.Printf("Ошибка при обработке ставки: %v", err)
+
+		// Проверяем, является ли ошибка бизнес-логической (нехватка денег)
+		if strings.Contains(err.Error(), "недостаточно средств") {
+			// Отдаем статус 400 Bad Request и понятное сообщение клиенту
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error": "insufficient funds"}`))
+			return
+		}
+
+		// Если это какая-то другая системная ошибка (например, отвалилась БД), возвращаем 500
 		http.Error(w, `{"error": "failed to process bet"}`, http.StatusInternalServerError)
 		return
 	}
