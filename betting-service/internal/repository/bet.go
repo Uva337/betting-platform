@@ -108,3 +108,27 @@ func (r *BetRepository) GetBetByID(ctx context.Context, id int) (*models.Bet, er
 
 	return &bet, nil
 }
+
+func (r *BetRepository) GetBetsByUserID(ctx context.Context, userID int) ([]models.Bet, error) {
+	query := `
+        SELECT id, user_id, match_id, amount, odds, status, created_at
+        FROM bets
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+    `
+	rows, err := r.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения истории ставок: %w", err)
+	}
+	defer rows.Close()
+
+	var bets []models.Bet
+	for rows.Next() {
+		var bet models.Bet
+		if err := rows.Scan(&bet.ID, &bet.UserID, &bet.MatchID, &bet.Amount, &bet.Odds, &bet.Status, &bet.CreatedAt); err != nil {
+			return nil, fmt.Errorf("ошибка сканирования ставки: %w", err)
+		}
+		bets = append(bets, bet)
+	}
+	return bets, nil
+}

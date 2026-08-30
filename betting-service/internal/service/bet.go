@@ -48,3 +48,7 @@ func (s *BetService) GetBet(ctx context.Context, id int) (*models.Bet, error) {
 	// например, проверка прав доступа, но пока просто проксируем запрос в БД
 	return s.repo.GetBetByID(ctx, id)
 }
+
+func (s *BetService) GetUserBets(ctx context.Context, userID int) ([]models.Bet, error) {
+	return s.repo.GetBetsByUserID(ctx, userID)
+}

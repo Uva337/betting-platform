@@ -62,6 +62,7 @@ func main() {
 
 		// Маршруты пользователей
 		r.Get("/users/{id}/balance", userHandler.GetBalance)
+		r.Get("/users/{id}/bets", betHandler.GetUserBets)
 	})
 
 	// ============================================

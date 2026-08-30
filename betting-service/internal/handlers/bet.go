@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/uva337/betting-platform/betting-service/internal/models"
 	"github.com/uva337/betting-platform/betting-service/internal/service"
 )
 
@@ -101,5 +102,39 @@ func (h *BetHandler) GetBet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "success",
 		"data":   bet,
+	})
+}
+
+// GetUserBets возвращает историю ставок конкретного пользователя
+func (h *BetHandler) GetUserBets(w http.ResponseWriter, r *http.Request) {
+	// 1. Вытаскиваем ID пользователя из URL (например, /users/1/bets)
+	idStr := chi.URLParam(r, "id")
+	userID, err := strconv.Atoi(idStr)
+	if err != nil || userID <= 0 {
+		http.Error(w, `{"error": "invalid user id"}`, http.StatusBadRequest)
+		return
+	}
+
+	// 2. Идем за ставками в слой бизнес-логики
+	bets, err := h.betService.GetUserBets(r.Context(), userID)
+	if err != nil {
+		log.Printf("Ошибка получения истории ставок: %v", err)
+		http.Error(w, `{"error": "failed to fetch bets"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Небольшой трюк: если ставок нет, срез bets будет равен nil.
+	// Чтобы JSON красиво выдал пустой массив [], а не null, делаем проверку:
+	if bets == nil {
+		bets = []models.Bet{} // инициализируем пустой срез
+	}
+
+	// 4. Отдаем успешный ответ
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"data":   bets,
 	})
 }
