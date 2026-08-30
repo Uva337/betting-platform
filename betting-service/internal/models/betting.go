@@ -16,11 +16,12 @@ type Match struct {
 }
 
 type Bet struct {
-	ID        int       `json:"id"`
-	UserID    int       `json:"user_id"`
-	MatchID   int       `json:"match_id"`
-	Amount    float64   `json:"amount"`
-	Odds      float64   `json:"odds"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         int       `json:"id"`
+	UserID     int       `json:"user_id"`
+	MatchID    int       `json:"match_id"`
+	Amount     float64   `json:"amount"`
+	Odds       float64   `json:"odds"`
+	Prediction string    `json:"prediction"`
+	Status     string    `json:"status"`
+	CreatedAt  time.Time `json:"created_at"`
 }

@@ -43,6 +43,10 @@ func main() {
 	userSvc := service.NewUserService(userRepo)
 	userHandler := handlers.NewUserHandler(userSvc)
 
+	matchRepo := repository.NewMatchRepository(pool)
+	matchSvc := service.NewMatchService(matchRepo, betRepo)
+	matchHandler := handlers.NewMatchHandler(matchSvc)
+
 	// ============================================
 	// НАСТРОЙКА РОУТЕРА
 	// ============================================
@@ -63,6 +67,8 @@ func main() {
 		// Маршруты пользователей
 		r.Get("/users/{id}/balance", userHandler.GetBalance)
 		r.Get("/users/{id}/bets", betHandler.GetUserBets)
+		// Маршруты матчей
+		r.Post("/matches/{id}/finish", matchHandler.FinishMatch)
 	})
 
 	// ============================================

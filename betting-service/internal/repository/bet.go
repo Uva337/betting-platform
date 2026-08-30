@@ -21,43 +21,32 @@ func NewBetRepository(pool *pgxpool.Pool) *BetRepository {
 
 // CreateBet сохраняет ставку и списывает деньги в рамках одной транзакции
 func (r *BetRepository) CreateBet(ctx context.Context, bet *models.Bet) error {
-	// 1. Начинаем транзакцию
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("ошибка старта транзакции: %w", err)
 	}
-
-	// defer tx.Rollback() - это страховка. Если мы выйдем из функции с ошибкой (до Commit),
-	// Rollback автоматически откатит все изменения в базе.
-	// Если же транзакция завершится успешно (Commit), Rollback простSо ничего не сделает.
 	defer tx.Rollback(ctx)
 
-	// 2. Списываем деньги с баланса (ТОЛЬКО если их хватает)
-	// Условие "AND balance >= $1" защищает нас от ухода баланса в минус
 	updateQuery := `
 		UPDATE users 
 		SET balance = balance - $1 
 		WHERE id = $2 AND balance >= $1
 	`
-	// tx.Exec выполняет запрос, не ожидая возврата строк данных
 	commandTag, err := tx.Exec(ctx, updateQuery, bet.Amount, bet.UserID)
 	if err != nil {
 		return fmt.Errorf("ошибка при обновлении баланса: %w", err)
 	}
 
-	// Проверяем, обновилась ли хоть одна строка.
-	// Если 0, значит либо юзера нет, либо у него недостаточно денег!
 	if commandTag.RowsAffected() == 0 {
 		return fmt.Errorf("недостаточно средств на балансе или пользователь не найден")
 	}
 
-	// 3. Сохраняем саму ставку
+	// ДОБАВЛЕНО: поле prediction (хардкод 'Team A' для новых ставок)
 	insertQuery := `
-		INSERT INTO bets (user_id, match_id, amount, odds, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+		INSERT INTO bets (user_id, match_id, amount, odds, prediction, status, created_at)
+		VALUES ($1, $2, $3, $4, 'Team A', $5, CURRENT_TIMESTAMP)
 		RETURNING id, created_at
 	`
-	// Обрати внимание: теперь мы используем tx.QueryRow, а не r.pool.QueryRow
 	err = tx.QueryRow(ctx, insertQuery,
 		bet.UserID,
 		bet.MatchID,
@@ -70,7 +59,6 @@ func (r *BetRepository) CreateBet(ctx context.Context, bet *models.Bet) error {
 		return fmt.Errorf("ошибка при сохранении ставки: %w", err)
 	}
 
-	// 4. Фиксируем транзакцию (окончательно сохраняем всё в БД)
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("ошибка коммита транзакции: %w", err)
 	}
@@ -80,38 +68,39 @@ func (r *BetRepository) CreateBet(ctx context.Context, bet *models.Bet) error {
 
 // GetBetByID ищет ставку в базе по её ID
 func (r *BetRepository) GetBetByID(ctx context.Context, id int) (*models.Bet, error) {
-	// Запрос на поиск одной строки (SELECT)
+	// ДОБАВЛЕНО: колонка prediction
 	query := `
-		SELECT id, user_id, match_id, amount, odds, status, created_at
+		SELECT id, user_id, match_id, amount, odds, prediction, status, created_at
 		FROM bets
 		WHERE id = $1
 	`
 
 	var bet models.Bet
 
-	// Выполняем запрос и считываем колонки в структуру.
-	// Порядок переменных в Scan() должен строго совпадать с порядком колонок в SELECT!
+	// ДОБАВЛЕНО: &bet.Prediction
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&bet.ID,
 		&bet.UserID,
 		&bet.MatchID,
 		&bet.Amount,
 		&bet.Odds,
+		&bet.Prediction,
 		&bet.Status,
 		&bet.CreatedAt,
 	)
 
 	if err != nil {
-		// Если база ответит "нет таких строк" (pgx.ErrNoRows), вернется эта ошибка
 		return nil, fmt.Errorf("ставка не найдена: %w", err)
 	}
 
 	return &bet, nil
 }
 
+// GetBetsByUserID получает историю ставок
 func (r *BetRepository) GetBetsByUserID(ctx context.Context, userID int) ([]models.Bet, error) {
+	// ДОБАВЛЕНО: колонка prediction
 	query := `
-        SELECT id, user_id, match_id, amount, odds, status, created_at
+        SELECT id, user_id, match_id, amount, odds, prediction, status, created_at
         FROM bets
         WHERE user_id = $1
         ORDER BY created_at DESC
@@ -125,10 +114,77 @@ func (r *BetRepository) GetBetsByUserID(ctx context.Context, userID int) ([]mode
 	var bets []models.Bet
 	for rows.Next() {
 		var bet models.Bet
-		if err := rows.Scan(&bet.ID, &bet.UserID, &bet.MatchID, &bet.Amount, &bet.Odds, &bet.Status, &bet.CreatedAt); err != nil {
+		// ДОБАВЛЕНО: &bet.Prediction
+		if err := rows.Scan(&bet.ID, &bet.UserID, &bet.MatchID, &bet.Amount, &bet.Odds, &bet.Prediction, &bet.Status, &bet.CreatedAt); err != nil {
 			return nil, fmt.Errorf("ошибка сканирования ставки: %w", err)
 		}
 		bets = append(bets, bet)
 	}
 	return bets, nil
+}
+
+// SettleBets обрабатывает ставки после завершения матча внутри транзакции.
+func (r *BetRepository) SettleBets(ctx context.Context, matchID int, matchWinner string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("ошибка старта транзакции расчета ставок: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	querySelect := `
+		SELECT id, user_id, amount, odds, status, prediction
+		FROM bets
+		WHERE match_id = $1 AND status = 'PENDING'
+		FOR UPDATE
+	`
+	rows, err := tx.Query(ctx, querySelect, matchID)
+	if err != nil {
+		return fmt.Errorf("ошибка получения pending ставок: %w", err)
+	}
+
+	var betsToProcess []models.Bet
+	for rows.Next() {
+		var b models.Bet
+		if err := rows.Scan(&b.ID, &b.UserID, &b.Amount, &b.Odds, &b.Status, &b.Prediction); err != nil {
+			rows.Close()
+			return fmt.Errorf("ошибка сканирования ставки при расчете: %w", err)
+		}
+		betsToProcess = append(betsToProcess, b)
+	}
+	rows.Close()
+
+	if len(betsToProcess) == 0 {
+		return tx.Commit(ctx)
+	}
+
+	for _, bet := range betsToProcess {
+		isWinner := bet.Prediction == matchWinner
+
+		if isWinner {
+			newStatus := "WON"
+			winnings := bet.Amount * bet.Odds
+
+			_, err = tx.Exec(ctx, `UPDATE bets SET status = $1 WHERE id = $2`, newStatus, bet.ID)
+			if err != nil {
+				return fmt.Errorf("ошибка обновления статуса выигравшей ставки %d: %w", bet.ID, err)
+			}
+
+			_, err = tx.Exec(ctx, `UPDATE users SET balance = balance + $1 WHERE id = $2`, winnings, bet.UserID)
+			if err != nil {
+				return fmt.Errorf("ошибка зачисления выигрыша юзеру %d: %w", bet.UserID, err)
+			}
+		} else {
+			newStatus := "LOST"
+			_, err = tx.Exec(ctx, `UPDATE bets SET status = $1 WHERE id = $2`, newStatus, bet.ID)
+			if err != nil {
+				return fmt.Errorf("ошибка обновления статуса проигравшей ставки %d: %w", bet.ID, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("ошибка коммита транзакции расчета: %w", err)
+	}
+
+	return nil
 }
