@@ -52,3 +52,27 @@ func (h *MatchHandler) FinishMatch(w http.ResponseWriter, r *http.Request) {
 		"message": "match finished and bets settled",
 	})
 }
+
+// GetLiveOdds возвращает текущие котировки матча
+func (h *MatchHandler) GetLiveOdds(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	matchID, err := strconv.Atoi(idStr)
+	if err != nil || matchID <= 0 {
+		http.Error(w, `{"error": "invalid match id"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Идем в Redis через сервис
+	odds, err := h.matchService.GetLiveOdds(r.Context(), matchID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"data":   odds,
+	})
+}

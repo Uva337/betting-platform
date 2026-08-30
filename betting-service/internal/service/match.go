@@ -4,19 +4,22 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/uva337/betting-platform/betting-service/internal/models"
 	"github.com/uva337/betting-platform/betting-service/internal/repository"
 )
 
 type MatchService struct {
 	matchRepo *repository.MatchRepository
 	betRepo   *repository.BetRepository
+	redisRepo *repository.RedisRepository
 }
 
 // NewMatchService принимает оба репозитория
-func NewMatchService(matchRepo *repository.MatchRepository, betRepo *repository.BetRepository) *MatchService {
+func NewMatchService(matchRepo *repository.MatchRepository, betRepo *repository.BetRepository, redisRepo *repository.RedisRepository) *MatchService {
 	return &MatchService{
 		matchRepo: matchRepo,
 		betRepo:   betRepo,
+		redisRepo: redisRepo,
 	}
 }
 
@@ -35,4 +38,14 @@ func (s *MatchService) FinishMatch(ctx context.Context, matchID int, winner stri
 	}
 
 	return nil
+}
+
+func (s *MatchService) GetLiveOdds(ctx context.Context, matchID int) (*models.MatchOdds, error) {
+	odds, err := s.redisRepo.GetMatchOdds(ctx, matchID)
+	if err != nil {
+		// В реальной системе тут мог бы быть фоллбэк на БД,
+		// но для Live-коэффициентов Redis - единственный источник правды
+		return nil, fmt.Errorf("коэффициенты не найдены: %w", err)
+	}
+	return odds, nil
 }

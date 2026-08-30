@@ -7,6 +7,7 @@ networks:
 volumes:
   pg_data:
   kafka_data:
+  redis_data:
 
 services:
   # ==========================================
@@ -85,3 +86,22 @@ services:
         condition: service_healthy
     networks:
       - betting_net
+      
+  # ==========================================
+  # Redis (Live Odds Cache)
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: betting_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - betting_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

@@ -4,10 +4,12 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/uva337/betting-platform/betting-service/internal/handlers"
 	"github.com/uva337/betting-platform/betting-service/internal/repository"
@@ -17,7 +19,7 @@ import (
 func main() {
 	log.Println("Starting Betting Service...")
 
-	// 1. Читаем конфиг / строку подключения (используем стандартный адрес из твоего docker-compose)
+	// 1. Читаем конфиг / строку подключения
 	dsn := "postgres://betting_admin:betting_secret_pass@localhost:5432/betting_service_db?sslmode=disable"
 
 	// 2. Создаем пул соединений с базой данных
@@ -29,10 +31,31 @@ func main() {
 
 	log.Println("Successfully connected to PostgreSQL (betting_service_db)!")
 
+	// ==========================================
+	// Подключение к Redis
+	// ==========================================
+	redisHost := os.Getenv("REDIS_PORT")
+	if redisHost == "" {
+		redisHost = "6379"
+	}
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:" + redisHost,
+		Password: "", // пароля нет
+		DB:       0,  // дефолтная база
+	})
+
+	// Проверяем соединение с Redis
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		log.Fatalf("Unable to connect to Redis: %v", err)
+	}
+	// defer rdb.Close() // ВАЖНО: Закрывать соединение в main не нужно, иначе приложение не сможет с ним работать после старта
+
+	log.Println("Successfully connected to Redis!")
+
 	// ============================================
 	// СБОРКА СЛОЕВ (Dependency Injection)
 	// ============================================
-	// 1. Подключение к базе данных (предполагаем, что пул у тебя уже настроен выше)
 
 	betRepo := repository.NewBetRepository(pool)
 	betSvc := service.NewBetService(betRepo)
@@ -43,8 +66,12 @@ func main() {
 	userSvc := service.NewUserService(userRepo)
 	userHandler := handlers.NewUserHandler(userSvc)
 
+	// Домен матчей + Redis
+	redisRepo := repository.NewRedisRepository(rdb)
 	matchRepo := repository.NewMatchRepository(pool)
-	matchSvc := service.NewMatchService(matchRepo, betRepo)
+
+	// Теперь мы передаем redisRepo внутрь сервиса матчей!
+	matchSvc := service.NewMatchService(matchRepo, betRepo, redisRepo)
 	matchHandler := handlers.NewMatchHandler(matchSvc)
 
 	// ============================================
@@ -67,8 +94,10 @@ func main() {
 		// Маршруты пользователей
 		r.Get("/users/{id}/balance", userHandler.GetBalance)
 		r.Get("/users/{id}/bets", betHandler.GetUserBets)
+
 		// Маршруты матчей
 		r.Post("/matches/{id}/finish", matchHandler.FinishMatch)
+		r.Get("/matches/{id}/odds", matchHandler.GetLiveOdds) // <-- Новый эндпоинт кэша
 	})
 
 	// ============================================
