@@ -75,5 +75,26 @@ func (s *MatchSimulator) Start(ctx context.Context, matchID int) {
 			log.Printf("Simulator ошибка отправки в Kafka: %v", err)
 		}
 	}
+
+	winner := "Team B"
+	if scoreA == 13 {
+		winner = "Team A"
+	}
+
+	finishEvent := models.MatchEvent{
+		MatchID:    matchID,
+		EventType:  "match_finished",
+		TeamAScore: scoreA,
+		TeamBScore: scoreB,
+		Winner:     winner,
+		Timestamp:  time.Now(),
+	}
+
+	finishBytes, _ := json.Marshal(finishEvent)
+	_ = s.writer.WriteMessages(ctx, kafka.Message{
+		Key:   []byte("live-match"),
+		Value: finishBytes,
+	})
+
 	log.Printf("Simulator: матч %d завершен со счетом %d:%d", matchID, scoreA, scoreB)
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/uva337/betting-platform/betting-service/internal/models"
 	"github.com/uva337/betting-platform/betting-service/internal/repository"
@@ -48,4 +49,17 @@ func (s *MatchService) GetLiveOdds(ctx context.Context, matchID int) (*models.Ma
 		return nil, fmt.Errorf("коэффициенты не найдены: %w", err)
 	}
 	return odds, nil
+}
+
+func (s *MatchService) CreateMatch(ctx context.Context, title string, oddsA, oddsB float64) (int, error) {
+	// Генерируем ID
+	matchID := int(time.Now().Unix() % 10000)
+
+	// Просим репозиторий сохранить данные
+	err := s.matchRepo.CreateMatch(ctx, matchID, title, oddsA, oddsB)
+	if err != nil {
+		return 0, err
+	}
+
+	return matchID, nil
 }

@@ -38,3 +38,12 @@ func (r *MatchRepository) FinishMatch(ctx context.Context, matchID int, winner s
 
 	return nil
 }
+
+func (r *MatchRepository) CreateMatch(ctx context.Context, matchID int, title string, oddsA, oddsB float64) error {
+	query := `
+		INSERT INTO matches (id, title, team_a_odds, team_b_odds, status) 
+		VALUES ($1, $2, $3, $4, 'PENDING')
+	`
+	_, err := r.pool.Exec(ctx, query, matchID, title, oddsA, oddsB)
+	return err
+}

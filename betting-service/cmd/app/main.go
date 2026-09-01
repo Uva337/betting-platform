@@ -5,10 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -47,11 +47,9 @@ func main() {
 		DB:       0,  // дефолтная база
 	})
 
-	// Проверяем соединение с Redis
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("Unable to connect to Redis: %v", err)
 	}
-	// defer rdb.Close() // ВАЖНО: Закрывать соединение в main не нужно, иначе приложение не сможет с ним работать после старта
 
 	log.Println("Successfully connected to Redis!")
 
@@ -63,25 +61,35 @@ func main() {
 	betSvc := service.NewBetService(betRepo)
 	betHandler := handlers.NewBetHandler(betSvc)
 
-	// Домен пользователей
 	userRepo := repository.NewUserRepository(pool)
 	userSvc := service.NewUserService(userRepo)
 	userHandler := handlers.NewUserHandler(userSvc)
 
-	// Домен матчей + Redis
 	redisRepo := repository.NewRedisRepository(rdb)
 	matchRepo := repository.NewMatchRepository(pool)
 
-	// Теперь мы передаем redisRepo внутрь сервиса матчей!
 	matchSvc := service.NewMatchService(matchRepo, betRepo, redisRepo)
 	matchHandler := handlers.NewMatchHandler(matchSvc)
-
 	wsHandler := handlers.NewWebSocketHandler(matchSvc)
+
+	kafkaBroker := "localhost:9094"
+	kafkaTopic := "match-events"
+
+	// Инициализируем админский хэндлер
+	adminHandler := handlers.NewAdminHandler(matchSvc, kafkaBroker, kafkaTopic)
 
 	// ============================================
 	// НАСТРОЙКА РОУТЕРА
 	// ============================================
 	r := chi.NewRouter()
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	}))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
@@ -91,33 +99,27 @@ func main() {
 			w.Write([]byte("pong"))
 		})
 
-		// Маршруты ставок
+		// Публичные маршруты
 		r.Post("/bets", betHandler.PlaceBet)
 		r.Get("/bets/{id}", betHandler.GetBet)
-
-		// Маршруты пользователей
 		r.Get("/users/{id}/balance", userHandler.GetBalance)
 		r.Get("/users/{id}/bets", betHandler.GetUserBets)
-
-		// Маршруты матчей
-		r.Post("/matches/{id}/finish", matchHandler.FinishMatch)
 		r.Get("/matches/{id}/odds", matchHandler.GetLiveOdds)
 		r.Get("/matches/{id}/ws", wsHandler.StreamOdds)
+
+		// Закрытые маршруты (Admin API)
+		r.Route("/admin", func(r chi.Router) {
+			r.Post("/matches", adminHandler.CreateMatchAPI)
+			r.Post("/matches/{id}/start", adminHandler.StartMatchSimulation)
+		})
 	})
 
-	kafkaBroker := "localhost:9094" // Адрес из нашего docker-compose (External порт)
-	kafkaTopic := "match-events"
-
-	// 1. Запускаем торговый движок
-	oddsEngine := worker.NewOddsEngine(redisRepo, kafkaBroker, kafkaTopic)
+	// ============================================
+	// ЗАПУСК ФОНОВЫХ ВОРКЕРОВ
+	// ============================================
+	// Запускаем только движок прослушивания (Consumer). Симулятор (Producer) теперь запускается только по API!
+	oddsEngine := worker.NewOddsEngine(redisRepo, matchSvc, kafkaBroker, kafkaTopic)
 	go oddsEngine.Start(context.Background())
-
-	// 2. Запускаем симулятор с УНИКАЛЬНЫМ ID матча
-	// Берем последние 4 цифры от текущего unix-времени, чтобы ID каждый раз был новым (например, 5823)
-	liveMatchID := int(time.Now().Unix() % 10000)
-
-	simulator := worker.NewMatchSimulator(kafkaBroker, kafkaTopic)
-	go simulator.Start(context.Background(), liveMatchID)
 
 	// ============================================
 	// ЗАПУСК СЕРВЕРА

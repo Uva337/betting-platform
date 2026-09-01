@@ -9,14 +9,16 @@ import (
 	"github.com/segmentio/kafka-go"
 	"github.com/uva337/betting-platform/betting-service/internal/models"
 	"github.com/uva337/betting-platform/betting-service/internal/repository"
+	"github.com/uva337/betting-platform/betting-service/internal/service"
 )
 
 type OddsEngine struct {
 	redisRepo *repository.RedisRepository
+	matchSvc  *service.MatchService
 	reader    *kafka.Reader
 }
 
-func NewOddsEngine(redisRepo *repository.RedisRepository, brokerURL, topic string) *OddsEngine {
+func NewOddsEngine(redisRepo *repository.RedisRepository, matchSvc *service.MatchService, brokerURL, topic string) *OddsEngine {
 	// Настраиваем чтение из Kafka
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: []string{brokerURL},
@@ -26,6 +28,7 @@ func NewOddsEngine(redisRepo *repository.RedisRepository, brokerURL, topic strin
 
 	return &OddsEngine{
 		redisRepo: redisRepo,
+		matchSvc:  matchSvc,
 		reader:    reader,
 	}
 }
@@ -35,7 +38,6 @@ func (e *OddsEngine) Start(ctx context.Context) {
 	defer e.reader.Close()
 
 	for {
-		// Читаем сообщение из топика (блокирующий вызов, ждет новых данных)
 		msg, err := e.reader.ReadMessage(ctx)
 		if err != nil {
 			log.Printf("OddsEngine ошибка чтения из Kafka: %v", err)
@@ -48,9 +50,21 @@ func (e *OddsEngine) Start(ctx context.Context) {
 			continue
 		}
 
-		log.Printf("OddsEngine получил событие: %s, Счет: %d:%d", event.EventType, event.TeamAScore, event.TeamBScore)
+		// АВТОМАТИЧЕСКИЙ РАСЧЕТ СТАВОК
+		if event.EventType == "match_finished" {
+			log.Printf("OddsEngine: получен сигнал о завершении матча %d. Запускаем расчет ставок! Победитель: %s", event.MatchID, event.Winner)
 
-		// Пересчитываем коэффициенты и сохраняем в Redis
+			// Вызываем нашу мощную транзакцию из БД!
+			err := e.matchSvc.FinishMatch(ctx, event.MatchID, event.Winner)
+			if err != nil {
+				log.Printf("❌ Ошибка расчета ставок: %v", err)
+			} else {
+				log.Printf("✅ Ставки для матча %d успешно рассчитаны и деньги начислены!", event.MatchID)
+			}
+			continue // Выходим на следующий круг цикла, котировки обновлять уже не нужно
+		}
+
+		log.Printf("OddsEngine получил событие: %s, Счет: %d:%d", event.EventType, event.TeamAScore, event.TeamBScore)
 		e.recalculateAndSave(ctx, event)
 	}
 }
