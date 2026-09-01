@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Live Betting</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #1e1e1e; color: #fff; }
+        .odds-box { display: flex; justify-content: center; gap: 50px; margin-top: 30px; }
+        .team { padding: 20px; background-color: #333; border-radius: 10px; width: 200px; }
+        .odds { font-size: 48px; font-weight: bold; color: #00ffcc; transition: color 0.2s; }
+        input, button { padding: 10px; font-size: 16px; margin: 5px; border-radius: 5px; border: none; }
+        button { background-color: #00ffcc; color: #000; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Лайв Трансляция Коэффициентов</h1>
+    
+    <!-- Поле для ввода ID матча -->
+    <input type="number" id="matchId" placeholder="ID матча из логов">
+    <button onclick="connect()">Подключиться к потоку</button>
+    
+    <div class="odds-box" id="oddsContainer" style="display: none;">
+        <div class="team">
+            <h3>Team A (Win)</h3>
+            <div class="odds" id="teamAOdds">-</div>
+        </div>
+        <div class="team">
+            <h3>Team B (Win)</h3>
+            <div class="odds" id="teamBOdds">-</div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        function connect() {
+            const matchId = document.getElementById('matchId').value;
+            if (!matchId) return alert("Введите ID матча!");
+            
+            if (ws) ws.close(); // Закрываем старое соединение, если есть
+            
+            // Подключаемся к нашему бэкенду по протоколу WS
+            ws = new WebSocket(`ws://localhost:8081/api/v1/matches/${matchId}/ws`);
+            
+            ws.onopen = () => {
+                document.getElementById('oddsContainer').style.display = 'flex';
+                console.log("Соединение установлено");
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateOdds('teamAOdds', data.team_a);
+                updateOdds('teamBOdds', data.team_b);
+            };
+        }
+
+        function updateOdds(elementId, newValue) {
+            const el = document.getElementById(elementId);
+            const currentValue = parseFloat(el.innerText);
+            const formattedValue = newValue.toFixed(2);
+            
+            if (el.innerText !== formattedValue) {
+                el.innerText = formattedValue;
+                // Анимация "вспышки" при изменении кэфа
+                el.style.color = "#ffffff";
+                setTimeout(() => el.style.color = "#00ffcc", 150);
+            }
+        }
+    </script>
+</body>
+</html>

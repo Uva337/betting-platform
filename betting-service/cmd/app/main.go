@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -14,6 +15,7 @@ import (
 	"github.com/uva337/betting-platform/betting-service/internal/handlers"
 	"github.com/uva337/betting-platform/betting-service/internal/repository"
 	"github.com/uva337/betting-platform/betting-service/internal/service"
+	"github.com/uva337/betting-platform/betting-service/internal/worker"
 )
 
 func main() {
@@ -74,6 +76,8 @@ func main() {
 	matchSvc := service.NewMatchService(matchRepo, betRepo, redisRepo)
 	matchHandler := handlers.NewMatchHandler(matchSvc)
 
+	wsHandler := handlers.NewWebSocketHandler(matchSvc)
+
 	// ============================================
 	// НАСТРОЙКА РОУТЕРА
 	// ============================================
@@ -97,8 +101,23 @@ func main() {
 
 		// Маршруты матчей
 		r.Post("/matches/{id}/finish", matchHandler.FinishMatch)
-		r.Get("/matches/{id}/odds", matchHandler.GetLiveOdds) // <-- Новый эндпоинт кэша
+		r.Get("/matches/{id}/odds", matchHandler.GetLiveOdds)
+		r.Get("/matches/{id}/ws", wsHandler.StreamOdds)
 	})
+
+	kafkaBroker := "localhost:9094" // Адрес из нашего docker-compose (External порт)
+	kafkaTopic := "match-events"
+
+	// 1. Запускаем торговый движок
+	oddsEngine := worker.NewOddsEngine(redisRepo, kafkaBroker, kafkaTopic)
+	go oddsEngine.Start(context.Background())
+
+	// 2. Запускаем симулятор с УНИКАЛЬНЫМ ID матча
+	// Берем последние 4 цифры от текущего unix-времени, чтобы ID каждый раз был новым (например, 5823)
+	liveMatchID := int(time.Now().Unix() % 10000)
+
+	simulator := worker.NewMatchSimulator(kafkaBroker, kafkaTopic)
+	go simulator.Start(context.Background(), liveMatchID)
 
 	// ============================================
 	// ЗАПУСК СЕРВЕРА
