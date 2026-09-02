@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/uva337/betting-platform/betting-service/internal/models"
 )
 
 // MatchRepository отвечает за работу с таблицей матчей
@@ -46,4 +47,28 @@ func (r *MatchRepository) CreateMatch(ctx context.Context, matchID int, title st
 	`
 	_, err := r.pool.Exec(ctx, query, matchID, title, oddsA, oddsB)
 	return err
+}
+
+func (r *MatchRepository) GetActiveMatches(ctx context.Context) ([]models.Match, error) {
+	query := `
+		SELECT id, title, team_a_odds, team_b_odds, status 
+		FROM matches 
+		WHERE status IN ('PENDING', 'LIVE') 
+		ORDER BY id DESC LIMIT 10
+	`
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var matches []models.Match
+	for rows.Next() {
+		var m models.Match
+		if err := rows.Scan(&m.ID, &m.Title, &m.TeamAodds, &m.TeamBodds, &m.Status); err != nil {
+			continue
+		}
+		matches = append(matches, m)
+	}
+	return matches, nil
 }

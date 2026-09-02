@@ -63,3 +63,7 @@ func (s *MatchService) CreateMatch(ctx context.Context, title string, oddsA, odd
 
 	return matchID, nil
 }
+
+func (s *MatchService) GetActiveMatches(ctx context.Context) ([]models.Match, error) {
+	return s.matchRepo.GetActiveMatches(ctx)
+}

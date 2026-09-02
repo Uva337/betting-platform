@@ -76,3 +76,13 @@ func (h *MatchHandler) GetLiveOdds(w http.ResponseWriter, r *http.Request) {
 		"data":   odds,
 	})
 }
+
+func (h *MatchHandler) GetActiveMatches(w http.ResponseWriter, r *http.Request) {
+	matches, err := h.matchService.GetActiveMatches(r.Context())
+	if err != nil {
+		http.Error(w, "не удалось получить матчи", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(matches)
+}

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -106,6 +107,7 @@ func main() {
 		r.Get("/users/{id}/bets", betHandler.GetUserBets)
 		r.Get("/matches/{id}/odds", matchHandler.GetLiveOdds)
 		r.Get("/matches/{id}/ws", wsHandler.StreamOdds)
+		r.Get("/matches", matchHandler.GetActiveMatches)
 
 		// Закрытые маршруты (Admin API)
 		r.Route("/admin", func(r chi.Router) {
@@ -120,6 +122,10 @@ func main() {
 	// Запускаем только движок прослушивания (Consumer). Симулятор (Producer) теперь запускается только по API!
 	oddsEngine := worker.NewOddsEngine(redisRepo, matchSvc, kafkaBroker, kafkaTopic)
 	go oddsEngine.Start(context.Background())
+
+	matchInterval := 3 * time.Minute
+	matchGenerator := worker.NewMatchGenerator(matchSvc, kafkaBroker, kafkaTopic, matchInterval)
+	go matchGenerator.Start(context.Background())
 
 	// ============================================
 	// ЗАПУСК СЕРВЕРА

@@ -27,6 +27,23 @@ func (r *BetRepository) CreateBet(ctx context.Context, bet *models.Bet) error {
 	}
 	defer tx.Rollback(ctx)
 
+	// ==========================================
+	// 1. ПРОВЕРКА СТАТУСА МАТЧА
+	// ==========================================
+	var matchStatus string
+	err = tx.QueryRow(ctx, "SELECT status FROM matches WHERE id = $1", bet.MatchID).Scan(&matchStatus)
+	if err != nil {
+		return fmt.Errorf("ошибка при поиске матча: %w", err)
+	}
+
+	// Если матч завершен или отменен — отбиваем ставку
+	if matchStatus == "FINISHED" || matchStatus == "CANCELLED" {
+		return fmt.Errorf("ставки закрыты: матч уже завершен")
+	}
+
+	// ==========================================
+	// 2. ОБНОВЛЕНИЕ БАЛАНСА
+	// ==========================================
 	updateQuery := `
 		UPDATE users 
 		SET balance = balance - $1 
@@ -41,7 +58,9 @@ func (r *BetRepository) CreateBet(ctx context.Context, bet *models.Bet) error {
 		return fmt.Errorf("недостаточно средств на балансе или пользователь не найден")
 	}
 
-	// ДОБАВЛЕНО: поле prediction (хардкод 'Team A' для новых ставок)
+	// ==========================================
+	// 3. СОХРАНЕНИЕ СТАВКИ В БАЗУ
+	// ==========================================
 	insertQuery := `
 		INSERT INTO bets (user_id, match_id, amount, odds, prediction, status, created_at)
 		VALUES ($1, $2, $3, $4, 'Team A', $5, CURRENT_TIMESTAMP)
@@ -68,7 +87,6 @@ func (r *BetRepository) CreateBet(ctx context.Context, bet *models.Bet) error {
 
 // GetBetByID ищет ставку в базе по её ID
 func (r *BetRepository) GetBetByID(ctx context.Context, id int) (*models.Bet, error) {
-	// ДОБАВЛЕНО: колонка prediction
 	query := `
 		SELECT id, user_id, match_id, amount, odds, prediction, status, created_at
 		FROM bets
@@ -77,7 +95,6 @@ func (r *BetRepository) GetBetByID(ctx context.Context, id int) (*models.Bet, er
 
 	var bet models.Bet
 
-	// ДОБАВЛЕНО: &bet.Prediction
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&bet.ID,
 		&bet.UserID,
@@ -98,7 +115,6 @@ func (r *BetRepository) GetBetByID(ctx context.Context, id int) (*models.Bet, er
 
 // GetBetsByUserID получает историю ставок
 func (r *BetRepository) GetBetsByUserID(ctx context.Context, userID int) ([]models.Bet, error) {
-	// ДОБАВЛЕНО: колонка prediction
 	query := `
         SELECT id, user_id, match_id, amount, odds, prediction, status, created_at
         FROM bets
@@ -114,7 +130,6 @@ func (r *BetRepository) GetBetsByUserID(ctx context.Context, userID int) ([]mode
 	var bets []models.Bet
 	for rows.Next() {
 		var bet models.Bet
-		// ДОБАВЛЕНО: &bet.Prediction
 		if err := rows.Scan(&bet.ID, &bet.UserID, &bet.MatchID, &bet.Amount, &bet.Odds, &bet.Prediction, &bet.Status, &bet.CreatedAt); err != nil {
 			return nil, fmt.Errorf("ошибка сканирования ставки: %w", err)
 		}
